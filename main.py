@@ -7,7 +7,6 @@ import re
 app = FastAPI()
 
 
-# ===== MODELO DO BODY (corrigido com alias) =====
 class WebhookMessage(BaseModel):
     from_: str = Field(..., alias="from")
     body: str
@@ -21,11 +20,42 @@ def home():
     return {"status": "ok", "message": "Bot financeiro rodando 🚀"}
 
 
-def extrair_valor(texto: str):
+def extrair_info(texto: str):
+    texto = texto.lower()
+
+    # valor
+    valor = None
     match = re.search(r"(\d+[.,]?\d*)", texto)
     if match:
-        return float(match.group(1).replace(",", "."))
-    return None
+        valor = float(match.group(1).replace(",", "."))
+
+    # tipo
+    tipo = "indefinido"
+    if any(p in texto for p in ["gastei", "comprei", "paguei", "pagar"]):
+        tipo = "despesa"
+    elif any(p in texto for p in ["recebi", "ganhei", "entrou"]):
+        tipo = "receita"
+
+    # categoria simples
+    categorias = {
+        "mercado": ["mercado", "supermercado"],
+        "roupas": ["roupa", "roupas"],
+        "alimentação": ["comida", "lanche", "almoço", "jantar"],
+        "transporte": ["uber", "ônibus", "gasolina", "combustível"],
+        "contas": ["luz", "água", "internet", "aluguel"]
+    }
+
+    categoria = None
+    for cat, palavras in categorias.items():
+        if any(p in texto for p in palavras):
+            categoria = cat
+            break
+
+    return {
+        "valor": valor,
+        "tipo": tipo,
+        "categoria": categoria
+    }
 
 
 @app.post("/webhook")
@@ -33,11 +63,20 @@ async def webhook(data: WebhookMessage):
     telefone = data.from_
     texto = data.body
 
-    valor = extrair_valor(texto)
+    info = extrair_info(texto)
 
-    resposta = "✅ Mensagem recebida!"
-    if valor:
-        resposta = f"💸 Anotei um gasto de R$ {valor:.2f}"
+    resposta = "📩 Mensagem recebida."
+
+    if info["valor"]:
+        if info["tipo"] == "despesa":
+            resposta = f"💸 Anotei um gasto de R$ {info['valor']:.2f}"
+        elif info["tipo"] == "receita":
+            resposta = f"💰 Registrei uma entrada de R$ {info['valor']:.2f}"
+        else:
+            resposta = f"💬 Vi o valor R$ {info['valor']:.2f}, mas não entendi se é gasto ou entrada."
+
+        if info["categoria"]:
+            resposta += f" na categoria *{info['categoria']}*."
 
     ULTRA_INSTANCE = os.getenv("ULTRA_INSTANCE")
     ULTRA_TOKEN = os.getenv("ULTRA_TOKEN")
@@ -54,7 +93,7 @@ async def webhook(data: WebhookMessage):
                 timeout=10
             )
         except Exception as e:
-            print("Erro ao enviar WhatsApp:", e)
+            print("Erro WhatsApp:", e)
 
     return {
         "status": "ok",
@@ -62,7 +101,5 @@ async def webhook(data: WebhookMessage):
             "from": telefone,
             "body": texto
         },
-        "parsed": {
-            "valor": valor
-        }
+        "parsed": info
     }
