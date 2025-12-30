@@ -1,55 +1,55 @@
 from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 import os
-import requests
 import re
+import requests
+from supabase import create_client
 
 app = FastAPI()
 
+# =============================
+# SUPABASE
+# =============================
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+# =============================
+# MODELO DE ENTRADA
+# =============================
 class WebhookMessage(BaseModel):
-    from_: str = Field(..., alias="from")
+    from_: str
     body: str
 
-    class Config:
-        populate_by_name = True
 
-
+# =============================
+# HOME
+# =============================
 @app.get("/")
 def home():
     return {"status": "ok", "message": "Bot financeiro rodando 🚀"}
 
 
-def extrair_info(texto: str):
-    texto = texto.lower()
+# =============================
+# FUNÇÃO DE PARSE SIMPLES
+# =============================
+def interpretar_texto(texto: str):
+    texto_lower = texto.lower()
 
-    # valor
-    valor = None
-    match = re.search(r"(\d+[.,]?\d*)", texto)
-    if match:
-        valor = float(match.group(1).replace(",", "."))
+    # valor (pega número com ou sem vírgula)
+    valor_match = re.search(r"(\d+[.,]?\d*)", texto_lower)
+    valor = float(valor_match.group(1).replace(",", ".")) if valor_match else None
 
-    # tipo
-    tipo = "indefinido"
-    if any(p in texto for p in ["gastei", "comprei", "paguei", "pagar"]):
-        tipo = "despesa"
-    elif any(p in texto for p in ["recebi", "ganhei", "entrou"]):
+    tipo = "despesa"
+    if any(p in texto_lower for p in ["ganhei", "recebi", "entrou", "salário"]):
         tipo = "receita"
 
-    # categoria simples
-    categorias = {
-        "mercado": ["mercado", "supermercado"],
-        "roupas": ["roupa", "roupas"],
-        "alimentação": ["comida", "lanche", "almoço", "jantar"],
-        "transporte": ["uber", "ônibus", "gasolina", "combustível"],
-        "contas": ["luz", "água", "internet", "aluguel"]
-    }
-
-    categoria = None
-    for cat, palavras in categorias.items():
-        if any(p in texto for p in palavras):
-            categoria = cat
-            break
+    categorias = ["mercado", "roupa", "aluguel", "comida", "uber", "gasolina"]
+    categoria = next((c for c in categorias if c in texto_lower), "outros")
 
     return {
         "valor": valor,
@@ -58,26 +58,27 @@ def extrair_info(texto: str):
     }
 
 
+# =============================
+# WEBHOOK
+# =============================
 @app.post("/webhook")
 async def webhook(data: WebhookMessage):
     telefone = data.from_
     texto = data.body
 
-    info = extrair_info(texto)
+    parsed = interpretar_texto(texto)
 
-    resposta = "📩 Mensagem recebida."
+    # salva no banco
+    if supabase and parsed["valor"] is not None:
+        supabase.table("movimentos").insert({
+            "telefone": telefone,
+            "tipo": parsed["tipo"],
+            "categoria": parsed["categoria"],
+            "valor": parsed["valor"],
+            "texto_original": texto
+        }).execute()
 
-    if info["valor"]:
-        if info["tipo"] == "despesa":
-            resposta = f"💸 Anotei um gasto de R$ {info['valor']:.2f}"
-        elif info["tipo"] == "receita":
-            resposta = f"💰 Registrei uma entrada de R$ {info['valor']:.2f}"
-        else:
-            resposta = f"💬 Vi o valor R$ {info['valor']:.2f}, mas não entendi se é gasto ou entrada."
-
-        if info["categoria"]:
-            resposta += f" na categoria *{info['categoria']}*."
-
+    # resposta opcional via UltraMsg
     ULTRA_INSTANCE = os.getenv("ULTRA_INSTANCE")
     ULTRA_TOKEN = os.getenv("ULTRA_TOKEN")
 
@@ -88,12 +89,12 @@ async def webhook(data: WebhookMessage):
                 data={
                     "token": ULTRA_TOKEN,
                     "to": telefone,
-                    "body": resposta
+                    "body": "✅ Anotado! Seu gasto foi registrado."
                 },
                 timeout=10
             )
-        except Exception as e:
-            print("Erro WhatsApp:", e)
+        except:
+            pass
 
     return {
         "status": "ok",
@@ -101,5 +102,5 @@ async def webhook(data: WebhookMessage):
             "from": telefone,
             "body": texto
         },
-        "parsed": info
+        "parsed": parsed
     }
