@@ -5,6 +5,7 @@ from supabase import create_client
 
 app = FastAPI()
 
+# conexão com o Supabase
 supabase = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
@@ -13,6 +14,8 @@ supabase = create_client(
 ULTRA_INSTANCE = os.getenv("ULTRA_INSTANCE")
 ULTRA_TOKEN = os.getenv("ULTRA_TOKEN")
 
+
+# ✅ ROTA DE TESTE (essa evita erro 404)
 @app.get("/")
 def home():
     return {
@@ -20,29 +23,25 @@ def home():
         "mensagem": "Bot financeiro rodando 🚀"
     }
 
+
+# ✅ ROTA DO WEBHOOK (cole aqui)
 @app.post("/webhook")
 async def webhook(req: Request):
-    data = await req.json()
+    try:
+        data = await req.json()
+    except:
+        data = {}
 
     texto = data.get("body", "")
     telefone = data.get("from", "")
 
-    # salva mensagem
-    supabase.table("mensagens").insert({
-        "telefone": telefone,
-        "texto": texto
-    }).execute()
+    if texto and telefone:
+        supabase.table("mensagens").insert({
+            "telefone": telefone,
+            "texto": texto
+        }).execute()
 
-    # resposta simples
-    resposta = "✅ Mensagem recebida! Já anotei aqui."
-
-    requests.post(
-        f"https://api.ultramsg.com/{ULTRA_INSTANCE}/messages/chat",
-        data={
-            "token": ULTRA_TOKEN,
-            "to": telefone,
-            "body": resposta
-        }
-    )
-
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "recebido": data
+    }
