@@ -1,21 +1,21 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
+from pydantic import BaseModel
 import os
 import requests
 from supabase import create_client
 
 app = FastAPI()
 
-# conexão com o Supabase
 supabase = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
 )
 
-ULTRA_INSTANCE = os.getenv("ULTRA_INSTANCE")
-ULTRA_TOKEN = os.getenv("ULTRA_TOKEN")
+class WebhookMessage(BaseModel):
+    from_: str | None = None
+    body: str | None = None
 
 
-# ✅ ROTA DE TESTE (essa evita erro 404)
 @app.get("/")
 def home():
     return {
@@ -24,18 +24,12 @@ def home():
     }
 
 
-# ✅ ROTA DO WEBHOOK (cole aqui)
 @app.post("/webhook")
-async def webhook(req: Request):
-    try:
-        data = await req.json()
-    except:
-        data = {}
+async def webhook(data: WebhookMessage):
+    telefone = data.from_
+    texto = data.body
 
-    texto = data.get("body", "")
-    telefone = data.get("from", "")
-
-    if texto and telefone:
+    if telefone and texto:
         supabase.table("mensagens").insert({
             "telefone": telefone,
             "texto": texto
@@ -43,5 +37,8 @@ async def webhook(req: Request):
 
     return {
         "status": "ok",
-        "recebido": data
+        "recebido": {
+            "from": telefone,
+            "body": texto
+        }
     }
