@@ -44,23 +44,32 @@ def interpretar_texto(texto: str):
     valor_match = re.search(r"(\d+[.,]?\d*)", texto_lower)
     valor = float(valor_match.group(1).replace(",", ".")) if valor_match else None
 
-    tipo = "despesa"
-    if any(p in texto_lower for p in ["ganhei", "recebi", "salário", "salario"]):
+      tipo = "despesa"
+    if any(p in texto_lower for p in ["ganhei", "recebi", "salário", "salario", "entrada"]):
         tipo = "receita"
 
-    categorias = [
-        "mercado", "roupa", "comida", "aluguel",
-        "uber", "gasolina", "internet", "luz", "agua"
-    ]
-
-    categoria = next((c for c in categorias if c in texto_lower), "outros")
-
-    return {
-        "valor": valor,
-        "tipo": tipo,
-        "categoria": categoria
+    categoria = "outros"
+    categorias = {
+        "mercado": "mercado",
+        "supermercado": "mercado",
+        "roupa": "roupas",
+        "almoço": "alimentação",
+        "janta": "alimentação",
+        "comida": "alimentação",
+        "aluguel": "moradia",
+        "luz": "contas",
+        "água": "contas",
+        "internet": "contas",
+        "gasolina": "transporte",
+        "uber": "transporte"
     }
 
+    for palavra, cat in categorias.items():
+        if palavra in texto_lower:
+            categoria = cat
+            break
+
+    return valor, tipo, categoria
 
 # =============================
 # WEBHOOK
