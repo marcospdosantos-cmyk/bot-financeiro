@@ -1,16 +1,19 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os
-import re
 import requests
+import re
 
 app = FastAPI()
 
 
-# ===== MODELO DO BODY (faz o Swagger mostrar o Request Body) =====
+# ===== MODELO DO BODY (corrigido com alias) =====
 class WebhookMessage(BaseModel):
-    from_: str
+    from_: str = Field(..., alias="from")
     body: str
+
+    class Config:
+        populate_by_name = True
 
 
 @app.get("/")
@@ -18,18 +21,11 @@ def home():
     return {"status": "ok", "message": "Bot financeiro rodando 🚀"}
 
 
-# ===== FUNÇÃO AUXILIAR PARA EXTRAIR VALOR E TEXTO =====
-def extrair_gasto(texto: str):
-    texto = texto.lower()
-
-    # tenta achar número (50, 25.90 etc)
+def extrair_valor(texto: str):
     match = re.search(r"(\d+[.,]?\d*)", texto)
-
-    valor = None
     if match:
-        valor = float(match.group(1).replace(",", "."))
-
-    return valor
+        return float(match.group(1).replace(",", "."))
+    return None
 
 
 @app.post("/webhook")
@@ -37,21 +33,15 @@ async def webhook(data: WebhookMessage):
     telefone = data.from_
     texto = data.body
 
-    valor = extrair_gasto(texto)
+    valor = extrair_valor(texto)
 
-    # resposta padrão
     resposta = "✅ Mensagem recebida!"
-
     if valor:
         resposta = f"💸 Anotei um gasto de R$ {valor:.2f}"
-    else:
-        resposta = "📩 Recebi sua mensagem, mas não identifiquei um valor."
 
-    # variáveis de ambiente (Render)
     ULTRA_INSTANCE = os.getenv("ULTRA_INSTANCE")
     ULTRA_TOKEN = os.getenv("ULTRA_TOKEN")
 
-    # envia resposta pro WhatsApp (se estiver configurado)
     if ULTRA_INSTANCE and ULTRA_TOKEN:
         try:
             requests.post(
