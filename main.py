@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os
 import re
 import requests
@@ -22,7 +22,7 @@ if SUPABASE_URL and SUPABASE_KEY:
 # MODELO DE ENTRADA
 # =============================
 class WebhookMessage(BaseModel):
-    from_: str
+    from_: str = Field(..., alias="from")
     body: str
 
 
@@ -35,20 +35,24 @@ def home():
 
 
 # =============================
-# FUNÇÃO DE PARSE SIMPLES
+# INTERPRETA TEXTO
 # =============================
 def interpretar_texto(texto: str):
     texto_lower = texto.lower()
 
-    # valor (pega número com ou sem vírgula)
+    # captura valor
     valor_match = re.search(r"(\d+[.,]?\d*)", texto_lower)
     valor = float(valor_match.group(1).replace(",", ".")) if valor_match else None
 
     tipo = "despesa"
-    if any(p in texto_lower for p in ["ganhei", "recebi", "entrou", "salário"]):
+    if any(p in texto_lower for p in ["ganhei", "recebi", "salário", "salario"]):
         tipo = "receita"
 
-    categorias = ["mercado", "roupa", "aluguel", "comida", "uber", "gasolina"]
+    categorias = [
+        "mercado", "roupa", "comida", "aluguel",
+        "uber", "gasolina", "internet", "luz", "agua"
+    ]
+
     categoria = next((c for c in categorias if c in texto_lower), "outros")
 
     return {
@@ -78,7 +82,7 @@ async def webhook(data: WebhookMessage):
             "texto_original": texto
         }).execute()
 
-    # resposta opcional via UltraMsg
+    # resposta WhatsApp (opcional)
     ULTRA_INSTANCE = os.getenv("ULTRA_INSTANCE")
     ULTRA_TOKEN = os.getenv("ULTRA_TOKEN")
 
@@ -89,7 +93,7 @@ async def webhook(data: WebhookMessage):
                 data={
                     "token": ULTRA_TOKEN,
                     "to": telefone,
-                    "body": "✅ Anotado! Seu gasto foi registrado."
+                    "body": "✅ Anotado! Já registrei esse lançamento."
                 },
                 timeout=10
             )
