@@ -13,6 +13,13 @@ supabase = create_client(
 ULTRA_INSTANCE = os.getenv("ULTRA_INSTANCE")
 ULTRA_TOKEN = os.getenv("ULTRA_TOKEN")
 
+@app.get("/")
+def home():
+    return {
+        "status": "ok",
+        "mensagem": "Bot financeiro rodando 🚀"
+    }
+
 @app.post("/webhook")
 async def webhook(req: Request):
     data = await req.json()
