@@ -1,30 +1,35 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
 import os
 import requests
 
 app = FastAPI()
 
 
+class WebhookMessage(BaseModel):
+    from_: str = Field(alias="from")
+    body: str
+
+
 @app.get("/")
 def home():
-    return {"status": "ok", "message": "Bot financeiro rodando 🚀"}
+    return {
+        "status": "ok",
+        "message": "Bot financeiro rodando 🚀"
+    }
 
 
 @app.post("/webhook")
-async def webhook(req: Request):
-    data = await req.json()
+async def webhook(data: WebhookMessage):
+    telefone = data.from_
+    texto = data.body
 
-    telefone = data.get("from", "")
-    texto = data.get("body", "")
-
-    # resposta padrão
     resposta = "✅ Mensagem recebida! Já anotei aqui."
 
-    # (opcional) enviar resposta via WhatsApp
     ULTRA_INSTANCE = os.getenv("ULTRA_INSTANCE")
     ULTRA_TOKEN = os.getenv("ULTRA_TOKEN")
 
-    if ULTRA_INSTANCE and ULTRA_TOKEN and telefone:
+    if ULTRA_INSTANCE and ULTRA_TOKEN:
         try:
             requests.post(
                 f"https://api.ultramsg.com/{ULTRA_INSTANCE}/messages/chat",
@@ -35,8 +40,8 @@ async def webhook(req: Request):
                 },
                 timeout=10
             )
-        except:
-            pass  # evita erro se API cair
+        except Exception as e:
+            print("Erro ao enviar resposta:", e)
 
     return {
         "status": "ok",
@@ -45,3 +50,4 @@ async def webhook(req: Request):
             "body": texto
         }
     }
+
