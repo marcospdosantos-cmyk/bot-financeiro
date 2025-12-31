@@ -35,19 +35,21 @@ def home():
 
 
 # =============================
-# INTERPRETA TEXTO
+# INTERPRETADOR DE TEXTO
 # =============================
 def interpretar_texto(texto: str):
     texto_lower = texto.lower()
 
-    # captura valor
+    # valor (ex: 45, 45.90, 45,90)
     valor_match = re.search(r"(\d+[.,]?\d*)", texto_lower)
     valor = float(valor_match.group(1).replace(",", ".")) if valor_match else None
 
-      tipo = "despesa"
+    # tipo
+    tipo = "despesa"
     if any(p in texto_lower for p in ["ganhei", "recebi", "salário", "salario", "entrada"]):
         tipo = "receita"
 
+    # categoria
     categoria = "outros"
     categorias = {
         "mercado": "mercado",
@@ -61,7 +63,7 @@ def interpretar_texto(texto: str):
         "água": "contas",
         "internet": "contas",
         "gasolina": "transporte",
-        "uber": "transporte"
+        "uber": "transporte",
     }
 
     for palavra, cat in categorias.items():
@@ -69,7 +71,12 @@ def interpretar_texto(texto: str):
             categoria = cat
             break
 
-    return valor, tipo, categoria
+    return {
+        "valor": valor,
+        "tipo": tipo,
+        "categoria": categoria
+    }
+
 
 # =============================
 # WEBHOOK
@@ -91,7 +98,7 @@ async def webhook(data: WebhookMessage):
             "texto_original": texto
         }).execute()
 
-    # resposta WhatsApp (opcional)
+    # resposta via WhatsApp
     ULTRA_INSTANCE = os.getenv("ULTRA_INSTANCE")
     ULTRA_TOKEN = os.getenv("ULTRA_TOKEN")
 
