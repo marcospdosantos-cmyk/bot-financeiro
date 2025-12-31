@@ -4,7 +4,7 @@ import os
 import re
 import requests
 from supabase import create_client
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 app = FastAPI()
 
@@ -20,7 +20,7 @@ if SUPABASE_URL and SUPABASE_KEY:
 
 
 # =============================
-# MODELO DE ENTRADA
+# MODELO
 # =============================
 class WebhookMessage(BaseModel):
     from_: str = Field(..., alias="from")
@@ -36,27 +36,57 @@ def home():
 
 
 # =============================
-# DETECTA INTENÇÃO
+# DETECTAR INTENÇÃO
 # =============================
 def detectar_intencao(texto: str):
-    texto = texto.lower()
+    t = texto.lower()
 
-    if any(p in texto for p in ["quanto", "resumo", "gastei hoje", "hoje", "mês", "mes"]):
+    if any(p in t for p in ["quanto", "resumo", "hoje", "ontem", "mês", "mes", "dia"]):
         return "consulta"
 
-    if any(p in texto for p in ["gastei", "paguei", "comprei", "recebi"]):
+    if any(p in t for p in ["gastei", "paguei", "comprei", "recebi"]):
         return "registro"
 
     return "desconhecido"
 
 
 # =============================
-# INTERPRETA TEXTO DE GASTO
+# DETECTAR DATA
+# =============================
+def extrair_data(texto: str):
+    texto = texto.lower()
+    hoje = date.today()
+
+    if "hoje" in texto:
+        return hoje
+
+    if "ontem" in texto:
+        return hoje - timedelta(days=1)
+
+    if "anteontem" in texto:
+        return hoje - timedelta(days=2)
+
+    # formato 10/01 ou 10-01 ou 10/01/2025
+    match = re.search(r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?", texto)
+    if match:
+        dia = int(match.group(1))
+        mes = int(match.group(2))
+        ano = int(match.group(3)) if match.group(3) else hoje.year
+
+        try:
+            return date(ano, mes, dia)
+        except:
+            pass
+
+    return None
+
+
+# =============================
+# INTERPRETAR TEXTO
 # =============================
 def interpretar_texto(texto: str):
     texto_lower = texto.lower()
 
-    # valor
     valor_match = re.search(r"(\d+[.,]?\d*)", texto_lower)
     valor = float(valor_match.group(1).replace(",", ".")) if valor_match else None
 
@@ -77,7 +107,7 @@ def interpretar_texto(texto: str):
         "água": "contas",
         "internet": "contas",
         "gasolina": "transporte",
-        "uber": "transporte",
+        "uber": "transporte"
     }
 
     for palavra, cat in categorias.items():
@@ -85,32 +115,29 @@ def interpretar_texto(texto: str):
             categoria = cat
             break
 
+    data_mov = extrair_data(texto)
+
     return {
         "valor": valor,
         "tipo": tipo,
-        "categoria": categoria
+        "categoria": categoria,
+        "data": data_mov
     }
 
 
 # =============================
 # CONSULTA GASTOS
 # =============================
-def consultar_gastos(telefone: str, periodo: str):
-    hoje = date.today()
-
+def consultar_gastos(telefone: str, data_ref: date | None):
     query = supabase.table("movimentos").select("*").eq("telefone", telefone)
 
-    if periodo == "hoje":
-        query = query.gte("criado_em", hoje.isoformat())
-
-    elif periodo == "mes":
-        primeiro_dia = hoje.replace(day=1)
-        query = query.gte("criado_em", primeiro_dia.isoformat())
+    if data_ref:
+        query = query.gte("criado_em", data_ref.isoformat())
+        query = query.lt("criado_em", (data_ref + timedelta(days=1)).isoformat())
 
     dados = query.execute().data or []
 
     total = sum(item["valor"] for item in dados if item["tipo"] == "despesa")
-
     return total, dados
 
 
@@ -123,38 +150,33 @@ async def webhook(data: WebhookMessage):
     texto = data.body.strip()
 
     intencao = detectar_intencao(texto)
+    resposta = "Não entendi 😅 Pode tentar de outro jeito?"
 
-    resposta = "Não entendi 😅 Pode repetir?"
-
-    # -------------------------
+    # =========================
     # CONSULTA
-    # -------------------------
+    # =========================
     if intencao == "consulta":
-        periodo = "hoje" if "hoje" in texto.lower() else "mes"
+        data_ref = extrair_data(texto)
+        total, dados = consultar_gastos(telefone, data_ref)
 
-        total, dados = consultar_gastos(telefone, periodo)
-
-        if total == 0:
-            resposta = "📭 Ainda não encontrei gastos nesse período."
+        if not dados:
+            resposta = "📭 Não encontrei gastos nesse período."
         else:
-            resposta = f"📊 Você gastou R$ {total:.2f} "
-
-            if periodo == "hoje":
-                resposta += "hoje.\n"
+            if data_ref:
+                resposta = f"📊 Gastos em {data_ref.strftime('%d/%m/%Y')}:\n"
             else:
-                resposta += "este mês.\n"
+                resposta = "📊 Seus gastos:\n"
 
             categorias = {}
             for item in dados:
-                cat = item["categoria"]
-                categorias[cat] = categorias.get(cat, 0) + item["valor"]
+                categorias[item["categoria"]] = categorias.get(item["categoria"], 0) + item["valor"]
 
             for cat, valor in categorias.items():
                 resposta += f"• {cat}: R$ {valor:.2f}\n"
 
-    # -------------------------
+    # =========================
     # REGISTRO
-    # -------------------------
+    # =========================
     elif intencao == "registro":
         parsed = interpretar_texto(texto)
 
@@ -164,17 +186,22 @@ async def webhook(data: WebhookMessage):
                 "tipo": parsed["tipo"],
                 "categoria": parsed["categoria"],
                 "valor": parsed["valor"],
-                "texto_original": texto
+                "texto_original": texto,
+                "criado_em": parsed["data"] or datetime.utcnow()
             }).execute()
 
-            resposta = f"✅ Anotado! {parsed['tipo']} de R$ {parsed['valor']:.2f} em {parsed['categoria']}."
+            resposta = (
+                f"✅ Anotado!\n"
+                f"{parsed['tipo'].capitalize()} de R$ {parsed['valor']:.2f}\n"
+                f"Categoria: {parsed['categoria']}"
+            )
 
         else:
             resposta = "Não consegui identificar o valor 😕"
 
-    # -------------------------
-    # ENVIA RESPOSTA NO WHATS
-    # -------------------------
+    # =========================
+    # ENVIO WHATSAPP
+    # =========================
     ULTRA_INSTANCE = os.getenv("ULTRA_INSTANCE")
     ULTRA_TOKEN = os.getenv("ULTRA_TOKEN")
 
@@ -194,9 +221,6 @@ async def webhook(data: WebhookMessage):
 
     return {
         "status": "ok",
-        "received": {
-            "from": telefone,
-            "body": texto
-        },
+        "received": {"from": telefone, "body": texto},
         "response": resposta
     }
